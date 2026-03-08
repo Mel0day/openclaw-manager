@@ -7,10 +7,10 @@ import { ShowToast } from '../App';
 type FixState = 'idle' | 'loading' | 'done' | 'error';
 
 function QuickFix({
-  title, desc, buttonLabel, onFix, result,
+  title, desc, buttonLabel, onFix,
 }: {
   title: string; desc: string; buttonLabel: string;
-  onFix: () => Promise<string>; result?: string;
+  onFix: () => Promise<string>;
 }) {
   const [state, setState] = useState<FixState>('idle');
   const [msg, setMsg] = useState('');
@@ -117,7 +117,7 @@ function FaqItem({ q, a }: { q: string; a: string }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default function Help({ showToast }: { showToast: ShowToast }) {
+export default function Help({ showToast: _showToast }: { showToast: ShowToast }) {
   return (
     <>
       {/* Quick Fixes */}

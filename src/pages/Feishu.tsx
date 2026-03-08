@@ -45,7 +45,7 @@ function StepCard({ num, title, desc, done, active, children }: {
   );
 }
 
-function ManualTag({ children }: { children: React.ReactNode }) {
+function ManualTag({ children: _children }: { children: React.ReactNode }) {
   return (
     <span style={{
       fontSize: 10, fontWeight: 700, background: 'rgba(245,158,11,0.15)',
