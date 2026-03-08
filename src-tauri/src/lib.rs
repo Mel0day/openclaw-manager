@@ -1,6 +1,17 @@
 use std::process::Command;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
+use ed25519_dalek::{VerifyingKey, Verifier, Signature};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+
+// 公钥 — 仅用于验证，无法伪造 token
+const PUBLIC_KEY_BYTES: [u8; 32] = [
+    0xf2, 0xd6, 0xaa, 0x0c, 0xde, 0xa4, 0x86, 0xbf,
+    0xe6, 0xa7, 0xa4, 0x8f, 0x1f, 0x8f, 0x32, 0x31,
+    0x9f, 0xbf, 0x51, 0xe4, 0x87, 0x10, 0x0f, 0x02,
+    0x74, 0x0e, 0xc2, 0x34, 0xd1, 0x94, 0x0e, 0x81,
+];
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -8,6 +19,19 @@ use serde::{Deserialize, Serialize};
 pub struct FeishuConfig {
     pub app_id: String,
     pub app_secret: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct ActivationState {
+    pub token: String,
+    pub expires_at: u64,
+}
+
+#[derive(Serialize)]
+pub struct ActivationInfo {
+    pub active: bool,
+    pub expires_at: u64,
+    pub remaining_secs: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -81,6 +105,17 @@ fn config_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("openclaw-manager")
         .join("feishu.json")
+}
+
+fn activation_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("openclaw-manager")
+        .join("activation.json")
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
 }
 
 fn dingtalk_config_path() -> PathBuf {
@@ -507,6 +542,75 @@ fn load_feishu_config() -> FeishuConfig {
         .unwrap_or_default()
 }
 
+// ── Activation ────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn check_activation() -> ActivationInfo {
+    let path = activation_path();
+    let state: ActivationState = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    let now = now_secs();
+    if state.token.is_empty() || now >= state.expires_at {
+        return ActivationInfo { active: false, expires_at: 0, remaining_secs: 0 };
+    }
+    ActivationInfo {
+        active: true,
+        expires_at: state.expires_at,
+        remaining_secs: state.expires_at - now,
+    }
+}
+
+#[tauri::command]
+fn activate(token: String) -> Result<ActivationInfo, String> {
+    let token = token.trim();
+
+    // Format: OCM-<payload_b64>.<sig_b64>
+    let inner = token.strip_prefix("OCM-").ok_or("激活码格式无效，应以 OCM- 开头")?;
+    let dot = inner.find('.').ok_or("激活码格式无效")?;
+    let payload_b64 = &inner[..dot];
+    let sig_b64 = &inner[dot+1..];
+
+    // Decode payload
+    let payload_bytes = URL_SAFE_NO_PAD.decode(payload_b64)
+        .map_err(|_| "激活码解析失败")?;
+    let payload: serde_json::Value = serde_json::from_slice(&payload_bytes)
+        .map_err(|_| "激活码内容无效")?;
+    let exp = payload["exp"].as_u64().ok_or("激活码缺少过期时间")?;
+
+    // Verify signature
+    let sig_bytes: [u8; 64] = URL_SAFE_NO_PAD.decode(sig_b64)
+        .map_err(|_| "签名解析失败")?
+        .try_into()
+        .map_err(|_| "签名长度无效")?;
+    let verifying_key = VerifyingKey::from_bytes(&PUBLIC_KEY_BYTES)
+        .map_err(|_| "公钥初始化失败")?;
+    let signature = Signature::from_bytes(&sig_bytes);
+    verifying_key.verify(payload_b64.as_bytes(), &signature)
+        .map_err(|_| "激活码签名无效，请确认激活码正确")?;
+
+    // Check expiry
+    let now = now_secs();
+    if now >= exp {
+        return Err(format!("激活码已过期"));
+    }
+
+    // Save
+    let state = ActivationState { token: token.to_string(), expires_at: exp };
+    let path = activation_path();
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&path, serde_json::to_string_pretty(&state).unwrap())
+        .map_err(|e| e.to_string())?;
+
+    Ok(ActivationInfo {
+        active: true,
+        expires_at: exp,
+        remaining_secs: exp - now,
+    })
+}
+
 // ── DingTalk ──────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -642,6 +746,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            // activation
+            check_activation,
+            activate,
             // env
             check_env,
             // install
