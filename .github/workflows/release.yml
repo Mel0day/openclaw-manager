@@ -50,16 +50,17 @@ jobs:
         run: npm install
 
       - name: Build and release
+        id: tauri-build
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS code signing (optional, fill in Secrets if you have an Apple Developer account)
-          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # APPLE_ID: ${{ secrets.APPLE_ID }}
-          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # macOS code signing
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseName: 'OpenClaw Manager ${{ github.event.inputs.tag || github.ref_name }}'
@@ -68,6 +69,47 @@ jobs:
             - **macOS Apple Silicon (M 系列)**：下载 `aarch64.dmg`
             - **macOS Intel**：下载 `x64.dmg`
             - **Windows**：下载 `x64-setup.exe`
+
+            > **macOS 用户提示**：如果打开时提示"已损坏"，请打开 DMG 后双击运行 `install.command` 脚本，它会自动修复并启动 App。
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      - name: Repackage DMG with install helper
+        if: runner.os == 'macOS'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+
+          for DMG in $(find src-tauri/target -name "*.dmg" 2>/dev/null); do
+            DMG_NAME=$(basename "$DMG")
+            WORK_DIR=$(mktemp -d)
+            MOUNT_POINT=$(mktemp -d)
+
+            echo "Processing $DMG_NAME ..."
+
+            # 挂载原始 DMG
+            hdiutil attach "$DMG" -mountpoint "$MOUNT_POINT" -nobrowse -quiet
+
+            # 复制 .app 和安装脚本
+            cp -R "$MOUNT_POINT"/*.app "$WORK_DIR/"
+            cp scripts/install.command "$WORK_DIR/install.command"
+            chmod +x "$WORK_DIR/install.command"
+
+            # 卸载
+            hdiutil detach "$MOUNT_POINT" -quiet
+
+            # 重新打包 DMG
+            hdiutil create \
+              -volname "openclaw-manager" \
+              -srcfolder "$WORK_DIR" \
+              -ov -format UDZO \
+              "/tmp/$DMG_NAME"
+
+            # 替换 Release 中的资源
+            gh release upload "$TAG" "/tmp/$DMG_NAME" --clobber
+
+            rm -rf "$WORK_DIR" "$MOUNT_POINT"
+            echo "Done: $DMG_NAME"
+          done
