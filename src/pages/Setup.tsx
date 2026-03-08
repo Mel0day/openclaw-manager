@@ -36,11 +36,11 @@ const PROVIDERS: Provider[] = [
 
 const GROUPS = ['国际主流', '国内模型', '本地/自托管'];
 
-function ProviderForm({ disabled, onSaved }: { disabled: boolean; onSaved: () => void }) {
+function ProviderForm({ disabled, onSaved, initialSaved }: { disabled: boolean; onSaved: () => void; initialSaved?: string[] }) {
   const [provider, setProvider] = useState('openai');
   const [value, setValue]       = useState('');
   const [saving, setSaving]     = useState(false);
-  const [saved, setSaved]       = useState<string[]>([]);
+  const [saved, setSaved]       = useState<string[]>(initialSaved ?? []);
 
   const current = PROVIDERS.find(p => p.id === provider)!;
 
@@ -116,6 +116,7 @@ type StepStatus = 'idle' | 'loading' | 'done' | 'error';
 
 export default function Setup({ showToast }: { showToast: ShowToast }) {
   const [env, setEnv] = useState<EnvStatus | null>(null);
+  const [savedProviders, setSavedProviders] = useState<string[]>([]);
 
   // step states
   const [installState,    setInstallState]    = useState<StepStatus>('idle');
@@ -145,6 +146,10 @@ export default function Setup({ showToast }: { showToast: ShowToast }) {
   useEffect(() => {
     checkEnv();
     detectExistingSetup();
+    // Load already-configured providers for badge persistence
+    invoke<{ providers_configured: string[] }>('check_security_posture')
+      .then(p => { if (p.providers_configured.length) { setSavedProviders(p.providers_configured); setApiKeyState('done'); } })
+      .catch(() => {});
   }, []);
 
   // ── actions ────────────────────────────────────────────────────────────────
@@ -337,7 +342,7 @@ export default function Setup({ showToast }: { showToast: ShowToast }) {
             <div className="step-body">
               <div className="step-title">配置 AI 模型</div>
               <div className="step-desc">选择你使用的模型提供商并填入凭据，可多次保存配置多个。</div>
-              <ProviderForm disabled={false} onSaved={() => setApiKeyState('done')} />
+              <ProviderForm disabled={false} initialSaved={savedProviders} onSaved={() => setApiKeyState('done')} />
               <div className="form-hint" style={{ marginTop: 8 }}>
                 也可跳过，之后在终端运行 <code style={{ fontFamily: 'monospace', fontSize: 11 }}>openclaw configure --section model</code>。
               </div>

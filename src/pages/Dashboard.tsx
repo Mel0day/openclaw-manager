@@ -3,15 +3,18 @@ import { invoke } from '@tauri-apps/api/core';
 import { ShowToast } from '../App';
 
 interface GatewayStatus { running: boolean; installed: boolean; url: string; }
+interface VersionInfo { installed: string | null; latest: string | null; up_to_date: boolean; }
 
 export default function Dashboard({ showToast }: { showToast: ShowToast }) {
   const [status,   setStatus]   = useState<GatewayStatus>({ running: false, installed: false, url: 'http://127.0.0.1:18789' });
   const [logs,     setLogs]     = useState('');
   const [doctor,   setDoctor]   = useState('');
   const [showDoc,  setShowDoc]  = useState(false);
-  const [loading,  setLoading]  = useState<string | null>(null); // tracks which action is in flight
+  const [loading,  setLoading]  = useState<string | null>(null);
   const [docLoading, setDocLoading] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
+  const [updating, setUpdating] = useState(false);
 
   const refreshStatus = async () => {
     const s = await invoke<GatewayStatus>('get_gateway_service_status');
@@ -23,6 +26,10 @@ export default function Dashboard({ showToast }: { showToast: ShowToast }) {
     setLogs(l || '（暂无日志）');
   };
 
+  const refreshVersion = () => {
+    invoke<VersionInfo>('get_openclaw_version_info').then(setVersionInfo).catch(() => {});
+  };
+
   useEffect(() => {
     let active = true;
     const poll = async () => {
@@ -32,6 +39,7 @@ export default function Dashboard({ showToast }: { showToast: ShowToast }) {
       await refreshLogs();
     };
     poll();
+    refreshVersion();
     const t = setInterval(poll, 6000);
     return () => { active = false; clearInterval(t); };
   }, []);
@@ -75,6 +83,19 @@ export default function Dashboard({ showToast }: { showToast: ShowToast }) {
     } catch (e: any) {
       showToast(`重启失败: ${e}`, 'error');
     } finally { setLoading(null); }
+  };
+
+  const updateOpenclaw = async () => {
+    setUpdating(true);
+    try {
+      await invoke('install_openclaw');
+      showToast('OpenClaw 已更新到最新版', 'success');
+      refreshVersion();
+    } catch (e: any) {
+      showToast(`更新失败: ${e}`, 'error');
+    } finally {
+      setUpdating(false);
+    }
   };
 
   const openDashboard = async () => {
@@ -170,6 +191,48 @@ export default function Dashboard({ showToast }: { showToast: ShowToast }) {
           <div className="card-title">端口</div>
           <div style={{ fontFamily: 'monospace', fontSize: 16, fontWeight: 700, color: 'var(--accent)' }}>18789</div>
           <div className="form-hint" style={{ marginTop: 4 }}>WebSocket Gateway</div>
+        </div>
+      </div>
+
+      {/* Version */}
+      <div className="card">
+        <div className="row-between" style={{ marginBottom: 0 }}>
+          <div>
+            <div className="card-title" style={{ margin: 0 }}>OpenClaw CLI 版本</div>
+            <div style={{ display: 'flex', gap: 16, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>已安装</div>
+                <div style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 15, color: 'var(--teal)' }}>
+                  {versionInfo?.installed ?? '—'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>最新版本</div>
+                <div style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 15, color: 'var(--accent)' }}>
+                  {versionInfo?.latest ?? '获取中...'}
+                </div>
+              </div>
+              {versionInfo && (
+                <div style={{ marginLeft: 8 }}>
+                  {versionInfo.up_to_date
+                    ? <span className="badge badge-green"><span className="dot"></span>已是最新</span>
+                    : <span className="badge badge-yellow"><span className="dot"></span>有可用更新</span>}
+                </div>
+              )}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost btn-sm" onClick={refreshVersion}>↻ 检查</button>
+            {versionInfo && !versionInfo.up_to_date && (
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={updateOpenclaw}
+                disabled={updating}
+              >
+                {updating ? <><span className="spin">↻</span> 更新中</> : '⬆ 一键更新'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

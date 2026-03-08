@@ -697,6 +697,441 @@ async fn install_shell_completion() -> Result<String, String> {
     run_openclaw(&["completion", "--install", "--shell", "zsh", "--yes"])
 }
 
+// ── Workspace Files ───────────────────────────────────────────────────────────
+
+fn workspace_dir() -> PathBuf {
+    dirs::home_dir().unwrap_or_default().join(".openclaw").join("workspace")
+}
+
+fn allowed_workspace_file(name: &str) -> bool {
+    matches!(name, "USER.md" | "SOUL.md" | "HEARTBEAT.md" | "MEMORY.md" | "AGENTS.md")
+}
+
+#[tauri::command]
+fn read_workspace_file(filename: String) -> Result<String, String> {
+    if !allowed_workspace_file(&filename) {
+        return Err(format!("不允许读取: {filename}"));
+    }
+    let path = workspace_dir().join(&filename);
+    std::fs::read_to_string(&path).map_err(|e| format!("读取失败: {e}"))
+}
+
+#[tauri::command]
+fn write_workspace_file(filename: String, content: String) -> Result<(), String> {
+    if !allowed_workspace_file(&filename) {
+        return Err(format!("不允许写入: {filename}"));
+    }
+    let path = workspace_dir().join(&filename);
+    std::fs::write(&path, content).map_err(|e| format!("写入失败: {e}"))
+}
+
+// ── Security Posture ──────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct SecurityPosture {
+    // File permission
+    pub openclaw_json_exists:  bool,
+    pub openclaw_json_perm_ok: bool,   // is chmod 600?
+    pub openclaw_json_mode:    String, // e.g. "644"
+
+    // Channels enabled
+    pub feishu_enabled:    bool,
+    pub feishu_dm_policy:  String,
+    pub feishu_allow_list: Vec<String>,
+    pub dingtalk_enabled:  bool,
+    pub dingtalk_dm_policy: String,
+
+    // AI providers with keys configured
+    pub providers_configured: Vec<String>,
+
+    // Skills / MCPs installed
+    pub skills_installed: Vec<String>,
+
+    // Security controls
+    pub audit_cron_exists:       bool,
+    pub sha256_baseline_exists:  bool,
+    pub agents_md_exists:        bool,
+    pub git_backup_configured:   bool,
+}
+
+#[tauri::command]
+fn check_security_posture() -> SecurityPosture {
+    let home = dirs::home_dir().unwrap_or_default();
+    let cfg_path = home.join(".openclaw").join("openclaw.json");
+
+    // ── openclaw.json ──
+    let openclaw_json_exists = cfg_path.exists();
+    let (openclaw_json_perm_ok, openclaw_json_mode) = if openclaw_json_exists {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            match std::fs::metadata(&cfg_path) {
+                Ok(m) => {
+                    let mode = m.mode() & 0o777;
+                    (mode == 0o600, format!("{:03o}", mode))
+                }
+                Err(_) => (false, "?".into()),
+            }
+        }
+        #[cfg(not(unix))]
+        { (true, "n/a".into()) }
+    } else {
+        (false, "-".into())
+    };
+
+    // ── parse openclaw.json ──
+    let cfg: serde_json::Value = std::fs::read_to_string(&cfg_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    let feishu_enabled = cfg.pointer("/channels/feishu/enabled")
+        .and_then(|v| v.as_bool()).unwrap_or(false);
+    let feishu_dm_policy = cfg.pointer("/channels/feishu/accounts/default/dmPolicy")
+        .and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+    let feishu_allow_list: Vec<String> = cfg
+        .pointer("/channels/feishu/accounts/default/allowFrom")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+        .unwrap_or_default();
+
+    let dingtalk_enabled = cfg.pointer("/channels/dingtalk/enabled")
+        .and_then(|v| v.as_bool()).unwrap_or(false);
+    let dingtalk_dm_policy = cfg.pointer("/channels/dingtalk/dmPolicy")
+        .and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+
+    // ── AI providers: check env vars set in openclaw config ──
+    let provider_keys = [
+        ("OpenAI",       "/env/OPENAI_API_KEY"),
+        ("Anthropic",    "/env/ANTHROPIC_API_KEY"),
+        ("Google Gemini","/env/GEMINI_API_KEY"),
+        ("Moonshot",     "/env/MOONSHOT_API_KEY"),
+        ("MiniMax",      "/env/MINIMAX_API_KEY"),
+        ("Mistral",      "/env/MISTRAL_API_KEY"),
+        ("OpenRouter",   "/env/OPENROUTER_API_KEY"),
+        ("火山引擎",      "/env/VOLCANO_ENGINE_API_KEY"),
+        ("Ollama",       "/models/providers/ollama/baseUrl"),
+    ];
+    let providers_configured: Vec<String> = provider_keys.iter()
+        .filter(|(_, path)| {
+            cfg.pointer(path)
+                .and_then(|v| v.as_str())
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false)
+        })
+        .map(|(name, _)| name.to_string())
+        .collect();
+
+    // ── Skills / MCPs ──
+    let skills_installed: Vec<String> = cfg
+        .pointer("/skills")
+        .and_then(|v| v.as_object())
+        .map(|obj| obj.keys().cloned().collect())
+        .unwrap_or_default();
+
+    // ── Security controls ──
+    // Nightly audit cron: look for openclaw-audit in crontab
+    let audit_cron_exists = run_cmd("crontab", &["-l"])
+        .map(|s| s.contains("openclaw") && s.contains("audit"))
+        .unwrap_or(false);
+
+    // SHA256 baseline file
+    let sha256_baseline_exists = home.join(".openclaw").join("security-baseline.sha256").exists()
+        || home.join(".openclaw").join("baseline.sha256").exists();
+
+    // AGENTS.md
+    let agents_md_exists = home.join(".openclaw").join("workspace").join("AGENTS.md").exists()
+        || home.join(".openclaw").join("AGENTS.md").exists();
+
+    // Git backup: check if ~/.openclaw is a git repo with a remote
+    let git_backup_configured = std::process::Command::new("git")
+        .args(["-C", home.join(".openclaw").to_str().unwrap_or(""), "remote", "get-url", "origin"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    SecurityPosture {
+        openclaw_json_exists,
+        openclaw_json_perm_ok,
+        openclaw_json_mode,
+        feishu_enabled,
+        feishu_dm_policy,
+        feishu_allow_list,
+        dingtalk_enabled,
+        dingtalk_dm_policy,
+        providers_configured,
+        skills_installed,
+        audit_cron_exists,
+        sha256_baseline_exists,
+        agents_md_exists,
+        git_backup_configured,
+    }
+}
+
+#[tauri::command]
+async fn fix_openclaw_json_perm() -> Result<String, String> {
+    #[cfg(unix)]
+    {
+        let home = dirs::home_dir().ok_or("no home")?;
+        let path = home.join(".openclaw").join("openclaw.json");
+        if !path.exists() {
+            return Err("openclaw.json 不存在".into());
+        }
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| e.to_string())?;
+        Ok("已设置 openclaw.json 权限为 600".into())
+    }
+    #[cfg(not(unix))]
+    { Ok("Windows 不需要此操作".into()) }
+}
+
+#[tauri::command]
+fn fix_sha256_baseline() -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("no home")?;
+    let cfg_path = home.join(".openclaw").join("openclaw.json");
+    if !cfg_path.exists() {
+        return Err("openclaw.json 不存在，请先完成安装向导".into());
+    }
+    let content = std::fs::read_to_string(&cfg_path).map_err(|e| e.to_string())?;
+    // Compute SHA256
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    // Use sha2 is not available; use openssl via command instead
+    let out = std::process::Command::new("shasum")
+        .args(["-a", "256", cfg_path.to_str().unwrap_or("")])
+        .output()
+        .map_err(|e| format!("shasum 命令失败: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).to_string());
+    }
+    let _ = content; // suppress unused warning
+    let baseline_path = home.join(".openclaw").join("security-baseline.sha256");
+    std::fs::write(&baseline_path, &out.stdout).map_err(|e| e.to_string())?;
+    Ok(format!(
+        "SHA256 基线已生成：{}",
+        String::from_utf8_lossy(&out.stdout).trim()
+    ))
+}
+
+#[tauri::command]
+fn fix_audit_cron() -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("no home")?;
+    let log_path = home.join(".openclaw").join("audit.log");
+    let openclaw_bin = home.join(".npm-global").join("bin").join("openclaw");
+    let bin = if openclaw_bin.exists() {
+        openclaw_bin.to_string_lossy().to_string()
+    } else {
+        "openclaw".to_string()
+    };
+    let cron_line = format!(
+        "0 2 * * * {} security audit --deep >> {} 2>&1\n",
+        bin,
+        log_path.display()
+    );
+
+    // Read existing crontab
+    let existing = std::process::Command::new("crontab")
+        .arg("-l")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+
+    if existing.contains("openclaw") && existing.contains("audit") {
+        return Ok("夜间审计 Cron 已存在，无需重复添加".into());
+    }
+
+    let new_crontab = format!("{}{}", existing.trim_end(), format!("\n{cron_line}"));
+
+    // Write back via crontab stdin
+    use std::io::Write;
+    let mut child = std::process::Command::new("crontab")
+        .arg("-")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("crontab 命令失败: {e}"))?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin.write_all(new_crontab.as_bytes()).map_err(|e| e.to_string())?;
+    }
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok("已添加夜间审计 Cron（每天凌晨 2 点），日志输出到 ~/.openclaw/audit.log".into())
+    } else {
+        Err("crontab 写入失败".into())
+    }
+}
+
+#[tauri::command]
+fn fix_git_backup() -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("no home")?;
+    let oc_dir = home.join(".openclaw");
+    if !oc_dir.exists() {
+        return Err("~/.openclaw 目录不存在".into());
+    }
+
+    // Check if already a git repo
+    let git_dir = oc_dir.join(".git");
+    if !git_dir.exists() {
+        let init = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&oc_dir)
+            .output()
+            .map_err(|e| format!("git init 失败: {e}"))?;
+        if !init.status.success() {
+            return Err(String::from_utf8_lossy(&init.stderr).to_string());
+        }
+    }
+
+    // Create/update .gitignore
+    let gitignore = oc_dir.join(".gitignore");
+    let ignore_content = "*.log\n*.tmp\npaired.json\n";
+    std::fs::write(&gitignore, ignore_content).ok();
+
+    // Stage and commit current state
+    std::process::Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(&oc_dir)
+        .output().ok();
+    std::process::Command::new("git")
+        .args(["commit", "-m", "security: initial openclaw backup snapshot",
+               "--allow-empty"])
+        .current_dir(&oc_dir)
+        .env("GIT_AUTHOR_NAME", "openclaw-manager")
+        .env("GIT_AUTHOR_EMAIL", "manager@openclaw")
+        .env("GIT_COMMITTER_NAME", "openclaw-manager")
+        .env("GIT_COMMITTER_EMAIL", "manager@openclaw")
+        .output().ok();
+
+    Ok("~/.openclaw 已初始化为 Git 仓库并创建初始提交。\n请手动添加远程仓库：\ngit -C ~/.openclaw remote add origin <你的私有仓库地址>\ngit -C ~/.openclaw push -u origin main".into())
+}
+
+// ── Security extra ────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct BaselineVerifyResult {
+    pub ok: bool,
+    pub current_hash: String,
+    pub baseline_hash: String,
+    pub message: String,
+}
+
+#[tauri::command]
+fn verify_sha256_baseline() -> Result<BaselineVerifyResult, String> {
+    let home = dirs::home_dir().ok_or("no home")?;
+    let cfg_path = home.join(".openclaw").join("openclaw.json");
+    let baseline_path = home.join(".openclaw").join("security-baseline.sha256");
+
+    if !cfg_path.exists()      { return Err("openclaw.json 不存在".into()); }
+    if !baseline_path.exists() { return Err("基线文件不存在，请先生成基线".into()); }
+
+    let out = std::process::Command::new("shasum")
+        .args(["-a", "256", cfg_path.to_str().unwrap_or("")])
+        .output()
+        .map_err(|e| format!("shasum 失败: {e}"))?;
+    let current = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let current_hash = current.split_whitespace().next().unwrap_or("").to_string();
+
+    let baseline_raw = std::fs::read_to_string(&baseline_path).map_err(|e| e.to_string())?;
+    let baseline_hash = baseline_raw.trim().split_whitespace().next().unwrap_or("").to_string();
+
+    let ok = !current_hash.is_empty() && current_hash == baseline_hash;
+    let message = if ok {
+        "文件完整，未检测到篡改".into()
+    } else {
+        format!("⚠ 哈希不匹配！文件可能已被篡改\n当前: {}\n基线: {}", current_hash, baseline_hash)
+    };
+
+    Ok(BaselineVerifyResult { ok, current_hash, baseline_hash, message })
+}
+
+#[tauri::command]
+fn set_git_remote(url: String) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("no home")?;
+    let oc_dir = home.join(".openclaw");
+
+    // Remove existing remote if any
+    std::process::Command::new("git")
+        .args(["remote", "remove", "origin"])
+        .current_dir(&oc_dir)
+        .output().ok();
+
+    // Add new remote
+    let add = std::process::Command::new("git")
+        .args(["remote", "add", "origin", url.trim()])
+        .current_dir(&oc_dir)
+        .output()
+        .map_err(|e| format!("git remote add 失败: {e}"))?;
+    if !add.status.success() {
+        return Err(String::from_utf8_lossy(&add.stderr).to_string());
+    }
+
+    // Stage and commit if needed
+    std::process::Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(&oc_dir)
+        .output().ok();
+    std::process::Command::new("git")
+        .args(["commit", "-m", "security: openclaw config backup", "--allow-empty"])
+        .current_dir(&oc_dir)
+        .env("GIT_AUTHOR_NAME", "openclaw-manager")
+        .env("GIT_AUTHOR_EMAIL", "manager@openclaw")
+        .env("GIT_COMMITTER_NAME", "openclaw-manager")
+        .env("GIT_COMMITTER_EMAIL", "manager@openclaw")
+        .output().ok();
+
+    // Push
+    let push = std::process::Command::new("git")
+        .args(["push", "-u", "origin", "HEAD"])
+        .current_dir(&oc_dir)
+        .output()
+        .map_err(|e| format!("git push 失败: {e}"))?;
+
+    if push.status.success() {
+        Ok(format!("已推送到远程仓库：{}", url.trim()))
+    } else {
+        let stderr = String::from_utf8_lossy(&push.stderr).to_string();
+        Err(format!("Remote 已配置，但 push 失败（可能需要先配置 Git 凭据）：\n{stderr}"))
+    }
+}
+
+#[tauri::command]
+fn get_audit_log() -> String {
+    let home = dirs::home_dir().unwrap_or_default();
+    let path = home.join(".openclaw").join("audit.log");
+    if !path.exists() {
+        return String::new();
+    }
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(100);
+    lines[start..].join("\n")
+}
+
+#[derive(Serialize)]
+pub struct VersionInfo {
+    pub installed: Option<String>,
+    pub latest: Option<String>,
+    pub up_to_date: bool,
+}
+
+#[tauri::command]
+fn get_openclaw_version_info() -> VersionInfo {
+    let installed = run_cmd("openclaw", &["--version"])
+        .map(|s| s.trim().to_string());
+
+    // Query npm registry for latest version
+    let latest = run_cmd("npm", &["view", "openclaw", "version",
+        "--registry", "https://registry.npmmirror.com"])
+        .map(|s| s.trim().to_string());
+
+    let up_to_date = match (&installed, &latest) {
+        (Some(i), Some(l)) => i.trim_start_matches('v') == l.trim_start_matches('v'),
+        _ => false,
+    };
+
+    VersionInfo { installed, latest, up_to_date }
+}
+
 // ── Logs & Network ────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -783,9 +1218,22 @@ pub fn run() {
             configure_dingtalk_channel,
             save_dingtalk_config,
             load_dingtalk_config,
+            // security
+            check_security_posture,
+            fix_openclaw_json_perm,
+            fix_sha256_baseline,
+            verify_sha256_baseline,
+            fix_audit_cron,
+            fix_git_backup,
+            set_git_remote,
+            get_audit_log,
+            get_openclaw_version_info,
             // quick fixes
             fix_npm_path,
             install_shell_completion,
+            // workspace
+            read_workspace_file,
+            write_workspace_file,
             // misc
             get_logs,
             get_local_ip,
