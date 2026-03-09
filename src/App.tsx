@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import './App.css';
-import Setup     from './pages/Setup';
-import Feishu    from './pages/Feishu';
-import Dingtalk  from './pages/Dingtalk';
-import Dashboard from './pages/Dashboard';
+import Setup      from './pages/Setup';
+import BotConfig  from './pages/BotConfig';
+import Dashboard  from './pages/Dashboard';
 import Help      from './pages/Help';
 import Workspace  from './pages/Workspace';
 import Plays      from './pages/Plays';
@@ -12,12 +11,11 @@ import Security   from './pages/Security';
 import Activate, { formatRemaining } from './pages/Activate';
 import type { ActivationInfo } from './pages/Activate';
 
-type Page = 'setup' | 'feishu' | 'dingtalk' | 'dashboard' | 'workspace' | 'plays' | 'security' | 'help';
+type Page = 'setup' | 'bots' | 'dashboard' | 'workspace' | 'plays' | 'security' | 'help';
 
 const NAV = [
   { id: 'setup',     icon: '🚀', label: '安装向导' },
-  { id: 'feishu',    icon: '📨', label: '飞书配置' },
-  { id: 'dingtalk',  icon: '🔔', label: '钉钉配置' },
+  { id: 'bots',      icon: '🤖', label: '机器人配置' },
   { id: 'dashboard', icon: '📊', label: '服务面板' },
   { id: 'workspace', icon: '📝', label: 'Workspace' },
   { id: 'plays',     icon: '🎮', label: '玩法推荐' },
@@ -26,10 +24,9 @@ const NAV = [
 ] as const;
 
 const PAGE_META: Record<Page, { title: string; sub: string }> = {
-  setup:     { title: '安装向导', sub: '检测环境并一键安装 OpenClaw' },
-  feishu:    { title: '飞书配置', sub: '配置飞书机器人接入' },
-  dingtalk:  { title: '钉钉配置', sub: '配置钉钉机器人接入' },
-  dashboard: { title: '服务面板', sub: '管理 OpenClaw Gateway 进程' },
+  setup:     { title: '安装向导',   sub: '检测环境并一键安装 OpenClaw' },
+  bots:      { title: '机器人配置', sub: '配置 IM 机器人接入（飞书 / 钉钉 / QQ / 更多）' },
+  dashboard: { title: '服务面板',   sub: '管理 OpenClaw Gateway 进程' },
   workspace: { title: 'Workspace', sub: '编辑 Agent 人格、记忆与心跳任务' },
   plays:     { title: '玩法推荐', sub: 'OpenClaw 主流使用场景与上手指南' },
   security:  { title: '安全管理', sub: '权限边界总览与安全防护状态检测' },
@@ -133,9 +130,8 @@ export default function App() {
           <span className="topbar-sub">{meta.sub}</span>
         </div>
         <div className={page === 'workspace' ? 'content-fill' : 'content'}>
-          {page === 'setup'     && <Setup     showToast={showToast} />}
-          {page === 'feishu'    && <Feishu    showToast={showToast} />}
-          {page === 'dingtalk'  && <Dingtalk  showToast={showToast} />}
+          {page === 'setup'     && <Setup      showToast={showToast} />}
+          {page === 'bots'      && <BotConfig  showToast={showToast} />}
           {page === 'dashboard' && <Dashboard  showToast={showToast} />}
           {page === 'workspace' && <Workspace  showToast={showToast} />}
           {page === 'plays'     && <Plays />}
