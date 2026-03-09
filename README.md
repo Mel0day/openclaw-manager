@@ -3,7 +3,7 @@
 > 一键安装、配置和管理 [OpenClaw](https://openclaw.ai) 的桌面客户端，支持飞书、钉钉、QQ、企业微信、Telegram、Discord、Slack、WhatsApp 等 8 个 IM 平台接入。
 
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue)
-![Version](https://img.shields.io/badge/version-0.1.3-brightgreen)
+![Version](https://img.shields.io/badge/version-0.1.4-brightgreen)
 ![Tauri](https://img.shields.io/badge/Tauri-2.x-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
