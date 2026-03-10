@@ -713,6 +713,308 @@ fn load_dingtalk_config() -> DingtalkConfig {
         .unwrap_or_default()
 }
 
+// ── QQ ────────────────────────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct QqConfig {
+    pub app_id: String,
+    pub app_secret: String,
+    pub token: String,
+}
+
+fn qq_config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("openclaw-manager")
+        .join("qq.json")
+}
+
+#[tauri::command]
+fn load_qq_config() -> QqConfig {
+    std::fs::read_to_string(qq_config_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn save_qq_config(app_id: String, app_secret: String, token: String) -> Result<(), String> {
+    let cfg = QqConfig { app_id, app_secret, token };
+    let path = qq_config_path();
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&path, serde_json::to_string_pretty(&cfg).unwrap())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn configure_qq_channel(
+    app_id: String,
+    app_secret: String,
+    token: String,
+    dm_policy: String,
+    group_policy: String,
+) -> Result<(), String> {
+    let p = "channels.qq";
+    run_openclaw(&["config", "set", &format!("{p}.enabled"), "true"])?;
+    run_openclaw(&["config", "set", &format!("{p}.appId"), &app_id])?;
+    run_openclaw(&["config", "set", &format!("{p}.appSecret"), &app_secret])?;
+    if !token.is_empty() {
+        run_openclaw(&["config", "set", &format!("{p}.token"), &token])?;
+    }
+    run_openclaw(&["config", "set", &format!("{p}.dmPolicy"), &dm_policy])?;
+    run_openclaw(&["config", "set", &format!("{p}.groupPolicy"), &group_policy])?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn install_qq_plugin() -> Result<String, String> {
+    run_openclaw(&[
+        "plugins", "install",
+        "https://github.com/openclaw/openclaw-channel-qq.git",
+    ])
+}
+
+// ── WeCom ─────────────────────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct WecomConfig {
+    pub corp_id: String,
+    pub agent_id: String,
+    pub app_secret: String,
+    pub token: String,
+    pub encoding_key: String,
+}
+
+fn wecom_config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("openclaw-manager")
+        .join("wecom.json")
+}
+
+#[tauri::command]
+fn load_wecom_config() -> WecomConfig {
+    std::fs::read_to_string(wecom_config_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn save_wecom_config(
+    corp_id: String,
+    agent_id: String,
+    app_secret: String,
+    token: String,
+    encoding_key: String,
+) -> Result<(), String> {
+    let cfg = WecomConfig { corp_id, agent_id, app_secret, token, encoding_key };
+    let path = wecom_config_path();
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&path, serde_json::to_string_pretty(&cfg).unwrap())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn configure_wecom_channel(
+    corp_id: String,
+    agent_id: String,
+    app_secret: String,
+    token: String,
+    encoding_key: String,
+    dm_policy: String,
+    group_policy: String,
+) -> Result<(), String> {
+    let p = "channels.wecom";
+    run_openclaw(&["config", "set", &format!("{p}.enabled"), "true"])?;
+    run_openclaw(&["config", "set", &format!("{p}.corpId"), &corp_id])?;
+    run_openclaw(&["config", "set", &format!("{p}.agentId"), &agent_id])?;
+    run_openclaw(&["config", "set", &format!("{p}.appSecret"), &app_secret])?;
+    if !token.is_empty() {
+        run_openclaw(&["config", "set", &format!("{p}.token"), &token])?;
+    }
+    if !encoding_key.is_empty() {
+        run_openclaw(&["config", "set", &format!("{p}.encodingAESKey"), &encoding_key])?;
+    }
+    run_openclaw(&["config", "set", &format!("{p}.dmPolicy"), &dm_policy])?;
+    run_openclaw(&["config", "set", &format!("{p}.groupPolicy"), &group_policy])?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn install_wecom_plugin() -> Result<String, String> {
+    run_openclaw(&[
+        "plugins", "install",
+        "https://github.com/openclaw/openclaw-channel-wecom.git",
+    ])
+}
+
+#[tauri::command]
+async fn start_wecom_tunnel() -> Result<String, String> {
+    run_openclaw(&["channels", "wecom", "tunnel", "--start"])
+}
+
+// ── Telegram ──────────────────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct TelegramConfig {
+    pub token: String,
+}
+
+fn telegram_config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("openclaw-manager")
+        .join("telegram.json")
+}
+
+#[tauri::command]
+fn load_telegram_config() -> TelegramConfig {
+    std::fs::read_to_string(telegram_config_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+async fn configure_telegram_channel(token: String) -> Result<(), String> {
+    let p = "channels.telegram";
+    run_openclaw(&["config", "set", &format!("{p}.enabled"), "true"])?;
+    run_openclaw(&["config", "set", &format!("{p}.token"), &token])?;
+    let cfg = TelegramConfig { token };
+    let path = telegram_config_path();
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&path, serde_json::to_string_pretty(&cfg).unwrap())
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ── Discord ───────────────────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct DiscordConfig {
+    pub token: String,
+}
+
+fn discord_config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("openclaw-manager")
+        .join("discord.json")
+}
+
+#[tauri::command]
+fn load_discord_config() -> DiscordConfig {
+    std::fs::read_to_string(discord_config_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+async fn configure_discord_channel(token: String) -> Result<(), String> {
+    let p = "channels.discord";
+    run_openclaw(&["config", "set", &format!("{p}.enabled"), "true"])?;
+    run_openclaw(&["config", "set", &format!("{p}.token"), &token])?;
+    let cfg = DiscordConfig { token };
+    let path = discord_config_path();
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&path, serde_json::to_string_pretty(&cfg).unwrap())
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ── Slack ─────────────────────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct SlackConfig {
+    pub app_token: String,
+    pub bot_token: String,
+}
+
+fn slack_config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("openclaw-manager")
+        .join("slack.json")
+}
+
+#[tauri::command]
+fn load_slack_config() -> SlackConfig {
+    std::fs::read_to_string(slack_config_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+async fn configure_slack_channel(app_token: String, bot_token: String) -> Result<(), String> {
+    let p = "channels.slack";
+    run_openclaw(&["config", "set", &format!("{p}.enabled"), "true"])?;
+    run_openclaw(&["config", "set", &format!("{p}.appToken"), &app_token])?;
+    run_openclaw(&["config", "set", &format!("{p}.botToken"), &bot_token])?;
+    let cfg = SlackConfig { app_token, bot_token };
+    let path = slack_config_path();
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&path, serde_json::to_string_pretty(&cfg).unwrap())
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ── WhatsApp ──────────────────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct WhatsappConfig {
+    pub linked_phone: String,
+}
+
+#[derive(Serialize)]
+pub struct WhatsappStatus {
+    pub connected: bool,
+    pub phone: String,
+}
+
+fn whatsapp_config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("openclaw-manager")
+        .join("whatsapp.json")
+}
+
+#[tauri::command]
+fn load_whatsapp_config() -> WhatsappConfig {
+    std::fs::read_to_string(whatsapp_config_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+async fn start_whatsapp_login() -> Result<String, String> {
+    run_openclaw(&["channels", "whatsapp", "login", "--qr-base64"])
+}
+
+#[tauri::command]
+async fn check_whatsapp_status() -> Result<WhatsappStatus, String> {
+    let out = run_openclaw(&["channels", "whatsapp", "status", "--json"])?;
+    let v: serde_json::Value = serde_json::from_str(&out)
+        .unwrap_or(serde_json::json!({"connected": false, "phone": ""}));
+    Ok(WhatsappStatus {
+        connected: v["connected"].as_bool().unwrap_or(false),
+        phone: v["phone"].as_str().unwrap_or("").to_string(),
+    })
+}
+
+#[tauri::command]
+async fn logout_whatsapp() -> Result<(), String> {
+    run_openclaw(&["channels", "whatsapp", "logout"])?;
+    let path = whatsapp_config_path();
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 // ── Quick Fixes ───────────────────────────────────────────────────────────────
 
 /// Ensure ~/.npm-global/bin is in the user's .zshrc PATH
@@ -1268,6 +1570,31 @@ pub fn run() {
             configure_dingtalk_channel,
             save_dingtalk_config,
             load_dingtalk_config,
+            // qq channel
+            install_qq_plugin,
+            configure_qq_channel,
+            save_qq_config,
+            load_qq_config,
+            // wecom channel
+            install_wecom_plugin,
+            configure_wecom_channel,
+            save_wecom_config,
+            load_wecom_config,
+            start_wecom_tunnel,
+            // telegram channel
+            load_telegram_config,
+            configure_telegram_channel,
+            // discord channel
+            load_discord_config,
+            configure_discord_channel,
+            // slack channel
+            load_slack_config,
+            configure_slack_channel,
+            // whatsapp channel
+            load_whatsapp_config,
+            start_whatsapp_login,
+            check_whatsapp_status,
+            logout_whatsapp,
             // security
             check_security_posture,
             fix_openclaw_json_perm,

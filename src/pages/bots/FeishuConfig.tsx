@@ -159,7 +159,7 @@ export default function FeishuConfig({ showToast, onConfigured }: IMConfigProps)
       setAllowState('idle');
       showToast(msg, 'success');
     } catch (e: any) {
-      setAllowState('error');
+      setAllowState('idle');
       showToast(`添加失败: ${e}`, 'error');
     }
   };

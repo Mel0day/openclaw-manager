@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { StepCard, IMConfigProps } from './shared';
 
@@ -8,11 +8,13 @@ export default function WhatsAppConfig({ showToast, onConfigured }: IMConfigProp
   const [loginState, setLoginState] = useState<LoginState>('idle');
   const [qrData,     setQrData]     = useState('');   // base64 PNG or data-url
   const [linkedPhone, setLinkedPhone] = useState('');
+  const connectedRef = useRef(false);
 
   useEffect(() => {
     invoke<{ linked_phone: string }>('load_whatsapp_config').then(cfg => {
       if (cfg.linked_phone) {
         setLinkedPhone(cfg.linked_phone);
+        connectedRef.current = true;
         setLoginState('connected');
         onConfigured?.();
       }
@@ -20,6 +22,7 @@ export default function WhatsAppConfig({ showToast, onConfigured }: IMConfigProp
   }, []);
 
   const startLogin = async () => {
+    connectedRef.current = false;
     setLoginState('loading');
     setQrData('');
     try {
@@ -41,6 +44,7 @@ export default function WhatsAppConfig({ showToast, onConfigured }: IMConfigProp
         const status = await invoke<{ connected: boolean; phone: string }>('check_whatsapp_status');
         if (status.connected) {
           clearInterval(interval);
+          connectedRef.current = true;
           setLinkedPhone(status.phone);
           setLoginState('connected');
           onConfigured?.();
@@ -53,7 +57,7 @@ export default function WhatsAppConfig({ showToast, onConfigured }: IMConfigProp
     // 3 分钟超时
     setTimeout(() => {
       clearInterval(interval);
-      if (loginState !== 'connected') {
+      if (!connectedRef.current) {
         setLoginState('idle');
         showToast('扫码超时，请重新尝试', 'error');
       }
