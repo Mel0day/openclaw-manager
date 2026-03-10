@@ -241,9 +241,38 @@ export default function Setup({ showToast }: { showToast: ShowToast }) {
         )}
       </div>
 
+      {/* Official curl installer */}
+      <div className="card" style={{ borderColor: 'rgba(74,158,255,0.35)', background: 'rgba(74,158,255,0.05)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <div className="card-title" style={{ margin: 0 }}>官方一键安装（推荐）</div>
+          <span className="badge badge-green">最简单</span>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--muted2)', marginBottom: 10, lineHeight: 1.7 }}>
+          在终端执行以下命令，自动完成 Node.js 检测、OpenClaw 安装与 Gateway 初始化，无需手动操作各步骤。
+        </div>
+        <div style={{ position: 'relative' }}>
+          <div className="code-box" style={{ fontFamily: 'monospace', fontSize: 13, color: 'var(--teal)', paddingRight: 80 }}>
+            curl -fsSL https://openclaw.ai/install.sh | bash
+          </div>
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 11 }}
+            onClick={() => {
+              navigator.clipboard.writeText('curl -fsSL https://openclaw.ai/install.sh | bash');
+              showToast('已复制安装命令', 'info');
+            }}
+          >
+            复制
+          </button>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
+          完成后刷新上方「环境检测」，再继续配置 AI 模型（步骤 5）和机器人即可。
+        </div>
+      </div>
+
       {/* Steps */}
       <div className="card">
-        <div className="card-title">安装向导</div>
+        <div className="card-title">手动安装向导</div>
         <div className="steps">
 
           {/* Step 1 */}
