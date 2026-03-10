@@ -70,7 +70,7 @@ export default function App() {
           </div>
         ))}
         <div className="sidebar-bottom">
-          <div className="version-tag">v0.1.2 · Tauri 2</div>
+          <div className="version-tag">v0.1.9 · Tauri 2</div>
         </div>
       </aside>
 
