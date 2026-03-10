@@ -70,8 +70,8 @@ jobs:
             - **macOS Intel**：下载 `x64.dmg`
             - **Windows**：下载 `x64-setup.exe`
 
-            > **macOS 提示「已损坏」？** DMG 内附有「如果提示已损坏请看这里.txt」，按文档操作即可。
-            > 或在终端执行：`xattr -d com.apple.quarantine ~/Downloads/openclaw-manager_*.dmg`
+            > **macOS 提示「无法验证开发者」？** 前往「系统设置 → 隐私与安全性」点击「仍要打开」即可。
+            > 或在终端执行：`sudo xattr -cr /Applications/openclaw-manager.app`
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
@@ -101,6 +101,11 @@ jobs:
 
             # 卸载
             hdiutil detach "$MOUNT_POINT" -quiet
+
+            # Ad-hoc 自签名：消除「已损坏」报错，用户改为看到「无法验证开发者」可点允许
+            APP=$(find "$WORK_DIR" -name "*.app" -maxdepth 1)
+            codesign --deep --force --sign - "$APP"
+            echo "Ad-hoc signed: $APP"
 
             # 重新打包 DMG
             hdiutil create \
