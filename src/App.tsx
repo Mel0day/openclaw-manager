@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { useState } from 'react';
 import './App.css';
 import Setup      from './pages/Setup';
 import BotConfig  from './pages/BotConfig';
@@ -8,8 +7,6 @@ import Help      from './pages/Help';
 import Workspace  from './pages/Workspace';
 import Plays      from './pages/Plays';
 import Security   from './pages/Security';
-import Activate, { formatRemaining } from './pages/Activate';
-import type { ActivationInfo } from './pages/Activate';
 
 type Page = 'setup' | 'bots' | 'dashboard' | 'workspace' | 'plays' | 'security' | 'help';
 
@@ -49,54 +46,12 @@ function ToastContainer({ toasts }: { toasts: ToastItem[] }) {
 export default function App() {
   const [page, setPage]           = useState<Page>('setup');
   const [toasts, setToasts]       = useState<ToastItem[]>([]);
-  const [activation, setActivation] = useState<ActivationInfo | null>(null);
-  const [checking, setChecking]   = useState(true);
-  const [remaining, setRemaining] = useState(0);
-
-  // Check activation on mount
-  useEffect(() => {
-    invoke<ActivationInfo>('check_activation')
-      .then(info => {
-        setActivation(info);
-        setRemaining(info.remaining_secs);
-      })
-      .catch(() => setActivation({ active: false, expires_at: 0, remaining_secs: 0 }))
-      .finally(() => setChecking(false));
-  }, []);
-
-  // Count down remaining time every minute
-  useEffect(() => {
-    if (!activation?.active) return;
-    const timer = setInterval(() => {
-      setRemaining(r => {
-        if (r <= 60) {
-          // Expired — re-check and force re-activation
-          setActivation(a => a ? { ...a, active: false } : a);
-          return 0;
-        }
-        return r - 60;
-      });
-    }, 60_000);
-    return () => clearInterval(timer);
-  }, [activation?.active]);
 
   const showToast: ShowToast = (msg, type = 'info') => {
     const id = Date.now();
     setToasts(p => [...p, { id, msg, type }]);
     setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3200);
   };
-
-  if (checking) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)', color: 'var(--muted)', fontSize: 14 }}>
-        <span className="spin" style={{ marginRight: 8 }}>↻</span> 验证授权...
-      </div>
-    );
-  }
-
-  if (!activation?.active) {
-    return <Activate onActivated={info => { setActivation(info); setRemaining(info.remaining_secs); }} />;
-  }
 
   const meta = PAGE_META[page];
 
@@ -116,11 +71,6 @@ export default function App() {
         ))}
         <div className="sidebar-bottom">
           <div className="version-tag">v0.1.2 · Tauri 2</div>
-          {remaining > 0 && (
-            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, textAlign: 'center' }}>
-              授权剩余 {formatRemaining(remaining)}
-            </div>
-          )}
         </div>
       </aside>
 
