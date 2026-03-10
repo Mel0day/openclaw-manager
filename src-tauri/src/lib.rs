@@ -307,18 +307,43 @@ fn strip_ansi(s: &str) -> String {
 
 #[tauri::command]
 async fn install_feishu_sdk() -> Result<String, String> {
-    let out = Command::new("pip3")
-        .args(["install", "lark-oapi", "--upgrade",
-               "-i", "https://mirrors.aliyun.com/pypi/simple/"])
+    // openclaw gateway 是 Node.js 进程，需要 npm 包 @larksuiteoapi/node-sdk
+    let npm = which_npm();
+    let out = Command::new(&npm)
+        .args(["install", "-g", "@larksuiteoapi/node-sdk"])
+        .env("PATH", augmented_path())
         .output()
-        .map_err(|e| format!("找不到 pip3: {e}"))?;
+        .map_err(|e| format!("找不到 npm: {e}"))?;
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-    if out.status.success() || stdout.contains("Successfully installed") || stdout.contains("already satisfied") {
+    if out.status.success() {
         Ok(stdout + &stderr)
     } else {
         Err(stderr + &stdout)
     }
+}
+
+fn which_npm() -> String {
+    // 优先使用 augmented PATH 里的 npm
+    let candidates = ["/opt/homebrew/bin/npm", "/usr/local/bin/npm", "npm"];
+    for c in candidates {
+        if std::path::Path::new(c).exists() || c == "npm" {
+            return c.to_string();
+        }
+    }
+    "npm".to_string()
+}
+
+#[tauri::command]
+async fn check_feishu_sdk() -> bool {
+    // 检查 @larksuiteoapi/node-sdk 是否已全局安装
+    let npm = which_npm();
+    Command::new(&npm)
+        .args(["list", "-g", "@larksuiteoapi/node-sdk", "--depth=0"])
+        .env("PATH", augmented_path())
+        .output()
+        .map(|o| o.status.success() && !String::from_utf8_lossy(&o.stdout).contains("(empty)"))
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -444,18 +469,40 @@ async fn run_feishu_test_script() -> Result<String, String> {
 async fn configure_feishu_channel(
     app_id: String,
     app_secret: String,
-    domain: String,   // "feishu" or "lark"
+    domain: String,      // "feishu" or "lark"
+    dm_policy: String,   // "allow" or "allowlist"
 ) -> Result<(), String> {
     let prefix = "channels.feishu";
+    let policy = if dm_policy == "allowlist" { "allowlist" } else { "allow" };
     run_openclaw(&["config", "set", &format!("{prefix}.enabled"), "true"])?;
     run_openclaw(&["config", "set", &format!("{prefix}.accounts.default.appId"), &app_id])?;
     run_openclaw(&["config", "set", &format!("{prefix}.accounts.default.appSecret"), &app_secret])?;
-    run_openclaw(&["config", "set", &format!("{prefix}.accounts.default.dmPolicy"), "allowlist"])?;
+    run_openclaw(&["config", "set", &format!("{prefix}.accounts.default.dmPolicy"), policy])?;
     run_openclaw(&["config", "set", &format!("{prefix}.accounts.default.streaming"), "true"])?;
     if domain == "lark" {
         run_openclaw(&["config", "set", &format!("{prefix}.domain"), "lark"])?;
     }
     Ok(())
+}
+
+#[tauri::command]
+async fn set_feishu_dm_policy(policy: String) -> Result<(), String> {
+    // policy: "allow" | "allowlist"
+    let p = if policy == "allowlist" { "allowlist" } else { "allow" };
+    run_openclaw(&["config", "set", "channels.feishu.accounts.default.dmPolicy", p])?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_feishu_dm_policy() -> String {
+    let home = dirs::home_dir().unwrap_or_default();
+    let cfg_path = home.join(".openclaw").join("openclaw.json");
+    let raw = std::fs::read_to_string(cfg_path).unwrap_or_default();
+    let cfg: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+    cfg.pointer("/channels/feishu/accounts/default/dmPolicy")
+        .and_then(|v| v.as_str())
+        .unwrap_or("allow")
+        .to_string()
 }
 
 /// Add a Feishu open_id to the allowFrom list in openclaw.json directly
@@ -1200,12 +1247,15 @@ pub fn run() {
             open_openclaw_dashboard,
             // feishu tools
             install_feishu_sdk,
+            check_feishu_sdk,
             check_gateway_proxy,
             fix_gateway_proxy,
             generate_feishu_test_script,
             run_feishu_test_script,
             // feishu channel
             configure_feishu_channel,
+            set_feishu_dm_policy,
+            get_feishu_dm_policy,
             approve_feishu_pairing,
             list_feishu_pairing,
             save_feishu_config,

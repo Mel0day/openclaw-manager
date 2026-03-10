@@ -44,11 +44,14 @@ export default function FeishuConfig({ showToast, onConfigured }: IMConfigProps)
   const [allowState,    setAllowState]    = useState<StepState>('idle');
 
   const [sdkState,       setSdkState]       = useState<StepState>('idle');
+  const [sdkInstalled,   setSdkInstalled]   = useState<boolean | null>(null);
   const [hasProxy,       setHasProxy]       = useState<boolean | null>(null);
   const [proxyState,     setProxyState]     = useState<StepState>('idle');
   const [scriptPath,     setScriptPath]     = useState('');
   const [scriptState,    setScriptState]    = useState<StepState>('idle');
   const [scriptRunState, setScriptRunState] = useState<StepState>('idle');
+  const [dmPolicy,       setDmPolicy]       = useState<'allow' | 'allowlist'>('allow');
+  const [policyState,    setPolicyState]    = useState<StepState>('idle');
 
   useEffect(() => {
     invoke<{ app_id: string; app_secret: string }>('load_feishu_config').then(cfg => {
@@ -57,6 +60,13 @@ export default function FeishuConfig({ showToast, onConfigured }: IMConfigProps)
     });
     invoke<boolean>('check_gateway_proxy').then(setHasProxy);
     invoke<string[]>('get_feishu_allow_list').then(setAllowList).catch(() => {});
+    invoke<boolean>('check_feishu_sdk').then(ok => {
+      setSdkInstalled(ok);
+      if (ok) setSdkState('done');
+    }).catch(() => setSdkInstalled(false));
+    invoke<string>('get_feishu_dm_policy').then(p => {
+      setDmPolicy(p === 'allowlist' ? 'allowlist' : 'allow');
+    }).catch(() => {});
   }, []);
 
   const configureChannel = async () => {
@@ -64,7 +74,7 @@ export default function FeishuConfig({ showToast, onConfigured }: IMConfigProps)
     setChannelState('loading');
     try {
       await invoke('save_feishu_config', { appId, appSecret });
-      await invoke('configure_feishu_channel', { appId, appSecret, domain });
+      await invoke('configure_feishu_channel', { appId, appSecret, domain, dmPolicy });
       setCredsSaved(true);
       setChannelState('done');
       onConfigured?.();
@@ -72,6 +82,19 @@ export default function FeishuConfig({ showToast, onConfigured }: IMConfigProps)
     } catch (e: any) {
       setChannelState('error');
       showToast(`配置失败: ${e}`, 'error');
+    }
+  };
+
+  const toggleDmPolicy = async (policy: 'allow' | 'allowlist') => {
+    setPolicyState('loading');
+    try {
+      await invoke('set_feishu_dm_policy', { policy });
+      setDmPolicy(policy);
+      setPolicyState('idle');
+      showToast(policy === 'allow' ? '已开放：所有人可发消息' : '已切换为白名单模式', 'success');
+    } catch (e: any) {
+      setPolicyState('idle');
+      showToast(`切换失败: ${e}`, 'error');
     }
   };
 
@@ -232,14 +255,19 @@ export default function FeishuConfig({ showToast, onConfigured }: IMConfigProps)
           <div className="card-title">本地工具准备</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 3 }}>① 安装飞书 Python SDK</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>① 安装飞书 Node.js SDK</span>
+                {sdkInstalled === true && <span className="badge badge-green"><span className="dot"></span>已安装</span>}
+                {sdkInstalled === false && <span className="badge" style={{ background: 'rgba(255,80,80,0.15)', color: 'var(--red)' }}>未安装</span>}
+              </div>
               <div style={{ fontSize: 12, color: 'var(--muted2)', marginBottom: 8 }}>
-                安装 <code style={{ fontFamily: 'monospace', color: 'var(--teal)', fontSize: 11 }}>lark-oapi</code>，用于建立临时长链接完成验证及本地调试。
+                安装 <code style={{ fontFamily: 'monospace', color: 'var(--teal)', fontSize: 11 }}>@larksuiteoapi/node-sdk</code>，OpenClaw Gateway 飞书插件依赖此包。
               </div>
               <button className={`btn btn-sm ${sdkState === 'done' ? 'btn-success' : 'btn-primary'}`}
-                onClick={installSdk} disabled={sdkState === 'loading' || sdkState === 'done'}>
+                onClick={installSdk} disabled={sdkState === 'loading' || sdkInstalled === true}>
                 {sdkState === 'loading' ? <><span className="spin">↻</span> 安装中...</>
-                  : sdkState === 'done' ? '✓ 已安装' : 'pip3 install lark-oapi'}
+                  : sdkInstalled === true ? '✓ 已安装'
+                  : 'npm install -g @larksuiteoapi/node-sdk'}
               </button>
             </div>
             <div style={{ height: 1, background: 'var(--border)' }} />
@@ -347,7 +375,41 @@ export default function FeishuConfig({ showToast, onConfigured }: IMConfigProps)
         </StepCard>
 
         <div className="card" style={{ borderColor: 'rgba(74,158,255,0.25)' }}>
-          <div className="card-title">免配对用户名单（allowFrom）</div>
+          <div className="card-title">私信权限</div>
+
+          {/* dmPolicy 开关 */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: 'var(--muted2)', marginBottom: 8, lineHeight: 1.7 }}>
+              控制哪些用户可以与机器人私信对话。修改后立即生效（无需重启 Gateway）。
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className={`btn btn-sm ${dmPolicy === 'allow' ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => toggleDmPolicy('allow')}
+                disabled={policyState === 'loading' || dmPolicy === 'allow'}
+              >
+                🌐 允许所有人
+              </button>
+              <button
+                className={`btn btn-sm ${dmPolicy === 'allowlist' ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => toggleDmPolicy('allowlist')}
+                disabled={policyState === 'loading' || dmPolicy === 'allowlist'}
+              >
+                🔒 仅白名单用户
+              </button>
+            </div>
+            {dmPolicy === 'allowlist' && (
+              <div className="form-hint" style={{ color: 'var(--yellow)', marginTop: 6 }}>
+                ⚠ 白名单模式：未在下方名单中的用户发消息将被忽略。
+              </div>
+            )}
+          </div>
+
+          <div style={{ height: 1, background: 'var(--border)', marginBottom: 14 }} />
+
+          <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--muted2)', marginBottom: 8 }}>
+            白名单用户（open_id）
+          </div>
           <div style={{ fontSize: 12, color: 'var(--muted2)', marginBottom: 12, lineHeight: 1.7 }}>
             将用户的 <code style={{ fontFamily: 'monospace', color: 'var(--teal)', fontSize: 11 }}>open_id</code> 加入名单后，该用户无需每次重新配对。
           </div>
