@@ -70,7 +70,8 @@ jobs:
             - **macOS Intel**：下载 `x64.dmg`
             - **Windows**：下载 `x64-setup.exe`
 
-            > **macOS 用户提示**：如果打开时提示"已损坏"，请打开 DMG 后双击运行 `install.command` 脚本，它会自动修复并启动 App。
+            > **macOS 提示「已损坏」？** DMG 内附有「如果提示已损坏请看这里.txt」，按文档操作即可。
+            > 或在终端执行：`xattr -d com.apple.quarantine ~/Downloads/openclaw-manager_*.dmg`
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
@@ -92,9 +93,10 @@ jobs:
             # 挂载原始 DMG
             hdiutil attach "$DMG" -mountpoint "$MOUNT_POINT" -nobrowse -quiet
 
-            # 复制 .app 和安装脚本
+            # 复制 .app、安装脚本和说明文档
             cp -R "$MOUNT_POINT"/*.app "$WORK_DIR/"
             cp scripts/install.command "$WORK_DIR/install.command"
+            cp "scripts/如果提示已损坏请看这里.txt" "$WORK_DIR/如果提示已损坏请看这里.txt"
             chmod +x "$WORK_DIR/install.command"
 
             # 卸载
