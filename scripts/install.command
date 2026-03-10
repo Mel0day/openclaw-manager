@@ -5,6 +5,9 @@ INSTALL_PATH="/Applications/$APP_NAME"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DMG_APP="$SCRIPT_DIR/$APP_NAME"
 
+# 第一步：先给脚本自身和 DMG 内所有文件解除隔离，避免 Gatekeeper 拦截
+xattr -cr "$SCRIPT_DIR" 2>/dev/null
+
 echo "================================================"
 echo " OpenClaw Manager 安装助手"
 echo "================================================"
@@ -30,6 +33,9 @@ elif [ -d "$DMG_APP" ]; then
 else
     echo "未找到 $APP_NAME"
     echo "请先将 openclaw-manager.app 拖到 Applications 文件夹后再运行此脚本。"
+    echo ""
+    echo "或在终端手动执行："
+    echo "  sudo xattr -cr /Applications/openclaw-manager.app"
 fi
 
 echo ""

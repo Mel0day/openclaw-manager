@@ -104,7 +104,15 @@
 | macOS Intel | `openclaw-manager_x.x.x_x64.dmg` |
 | Windows | `openclaw-manager_x.x.x_x64-setup.exe` |
 
-> **macOS 首次打开提示「已损坏」或「无法验证开发者」**：打开 DMG 后双击运行 `install.command` 脚本，会自动修复并启动 App。或前往「系统设置 → 隐私与安全性」点击「仍要打开」。
+> **macOS 提示「已损坏，无法打开」**：由于 App 暂未签名，macOS 会隔离从网络下载的文件。在终端执行以下命令解除隔离后重新安装即可：
+> ```bash
+> # 方法一：对 DMG 文件直接解除（推荐）
+> xattr -d com.apple.quarantine ~/Downloads/openclaw-manager_*.dmg
+> ```
+> ```bash
+> # 方法二：已拖入 Applications 后执行
+> sudo xattr -cr /Applications/openclaw-manager.app
+> ```
 
 ---
 
